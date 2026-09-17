@@ -11,6 +11,7 @@ import type { ProxyConfig } from '../../providers/plugins/sso/index.js';
 import { ProviderRegistry } from '../../providers/index.js';
 import type { CodeMieConfigOptions } from '../../env/types.js';
 import { getRandomWelcomeMessage, getRandomGoodbyeMessage } from '../../utils/goodbye-messages.js';
+import { formatTipLine, getSessionTip } from '../../utils/tips.js';
 import { syncRegisteredSkills } from '../../cli/commands/skills/setup/sync.js';
 import { renderProfileInfo } from '../../utils/profile.js';
 import chalk from 'chalk';
@@ -588,6 +589,12 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
 
       // Show random welcome message
       console.log(chalk.cyan.bold(getRandomWelcomeMessage()));
+
+      const startTip = getSessionTip('start');
+      if (startTip) {
+        console.log('');
+        console.log(formatTipLine(startTip));
+      }
       console.log(''); // Empty line for spacing
 
       // Silently sync registered skills in background (fire-and-forget)
@@ -748,12 +755,7 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
         await endSessionAndCleanup(0);
         await executeAfterRun(this, this.metadata.lifecycle, this.metadata.name, 0, env);
 
-        if (!this.metadata.silentMode) {
-          console.log(chalk.cyan.bold(getRandomGoodbyeMessage()));
-          console.log(''); // Spacing before powered by
-          console.log(chalk.cyan('Powered by AI/Run CodeMie CLI'));
-          console.log(''); // Empty line for spacing
-        }
+        this.renderSessionEnd();
         return;
       } catch (error) {
         await endSessionAndCleanup(1);
@@ -917,13 +919,7 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
           // Write the per-session analytics report (gated, non-fatal).
           await this.maybeWriteSessionReport(env);
 
-          // Show goodbye message with random easter egg (skip in silent mode for ACP)
-          if (!this.metadata.silentMode) {
-            console.log(chalk.cyan.bold(getRandomGoodbyeMessage()));
-            console.log(''); // Spacing before powered by
-            console.log(chalk.cyan('Powered by AI/Run CodeMie CLI'));
-            console.log(''); // Empty line for spacing
-          }
+          this.renderSessionEnd();
 
           if (code === 0) {
             resolve();
@@ -942,6 +938,27 @@ export abstract class BaseAgentAdapter implements AgentAdapter {
 
       throw error;
     }
+  }
+
+  /**
+   * Render the session-end goodbye block: random goodbye message, one
+   * rotation-tracked tip, and the Powered-by line. Single source of truth for
+   * both exit paths (built-in handler and spawned binary). No-op in silent
+   * mode, where stdout may be a JSON-RPC stream.
+   */
+  private renderSessionEnd(): void {
+    if (this.metadata.silentMode) {
+      return;
+    }
+    console.log(chalk.cyan.bold(getRandomGoodbyeMessage()));
+    const endTip = getSessionTip('end');
+    if (endTip) {
+      console.log('');
+      console.log(formatTipLine(endTip));
+    }
+    console.log(''); // Spacing before powered by
+    console.log(chalk.cyan('Powered by AI/Run CodeMie CLI'));
+    console.log(''); // Empty line for spacing
   }
 
   /**
