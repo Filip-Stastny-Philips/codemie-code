@@ -71,7 +71,7 @@ export async function updateAssistant(
   const defaultLlmModel =
     llmModels.find((m) => m.default)?.base_name ?? llmModels[0].base_name;
 
-  const mergedParams: Writeable<Partial<AssistantUpdateParams>> = {
+  const mergedParams = {
     ...existing,
     ...params,
     icon_url: existing.icon_url ?? "",
@@ -81,7 +81,7 @@ export async function updateAssistant(
     categories:
       params.categories ?? existing.categories?.map((c) => c.id) ?? [],
     toolkits: params.toolkits ?? existing.toolkits ?? [],
-  };
+  } as Writeable<Partial<AssistantUpdateParams>>;
 
   if (params.temperature !== undefined) mergedParams.temperature = params.temperature;
   else if (existing.temperature === null) delete mergedParams.temperature;
