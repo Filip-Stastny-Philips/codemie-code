@@ -176,6 +176,7 @@ export interface LegacyConfig {
 export interface MultiProviderConfig {
   version: 2;
   activeProfile: string;
+  activeProfileScope?: StorageScope;
   codemieSkills?: CodemieSkill[];
   codemieAssistants?: CodemieAssistant[];
   userEmail?: string;
