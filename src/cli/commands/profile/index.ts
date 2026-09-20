@@ -103,7 +103,6 @@ async function handleStatus(): Promise<void> {
   const config = await ConfigLoader.load(workingDir);
   const profiles = await ConfigLoader.listProfiles(workingDir);
   const activeProfileName = await ConfigLoader.getActiveProfileName(workingDir);
-  const hasLocalConfig = await ConfigLoader.hasLocalConfig(workingDir);
 
   // Find active profile
   const activeProfileInfo = profiles.find(p => p.name === activeProfileName);
@@ -146,7 +145,7 @@ async function handleStatus(): Promise<void> {
   }
 
   // Show source indicator
-  const sourceIndicator = hasLocalConfig
+  const sourceIndicator = activeProfileInfo.source === 'local'
     ? chalk.yellow('(source: local .codemie/)')
     : chalk.cyan('(source: global ~/.codemie/)');
 
@@ -329,8 +328,6 @@ function createSwitchCommand(): Command {
     .action(async (profileName?: string) => {
       try {
         const workingDir = process.cwd();
-        const hasLocal = await ConfigLoader.hasLocalConfig(workingDir);
-
         // If no profile name provided, prompt interactively
         if (!profileName) {
           const profiles = await ConfigLoader.listProfiles(workingDir);
@@ -355,9 +352,9 @@ function createSwitchCommand(): Command {
           throw new Error('Profile name is required');
         }
 
-        await ConfigLoader.switchProfile(profileName, workingDir);
+        const scope = await ConfigLoader.switchProfile(profileName, workingDir);
 
-        const location = hasLocal ? 'local config' : 'global config';
+        const location = scope === 'local' ? 'local config' : 'global config';
         console.log(chalk.green(`\n✓ Switched to profile "${profileName}" in ${location}\n`));
       } catch (error: unknown) {
         logger.error('Failed to switch profile:', error);
@@ -378,8 +375,6 @@ function createDeleteCommand(): Command {
     .action(async (profileName?: string, options: { yes?: boolean } = {}) => {
       try {
         const workingDir = process.cwd();
-        const hasLocal = await ConfigLoader.hasLocalConfig(workingDir);
-
         // If no profile name provided, prompt interactively
         if (!profileName) {
           const profiles = await ConfigLoader.listProfiles(workingDir);
@@ -397,9 +392,11 @@ function createDeleteCommand(): Command {
           throw new Error('Profile name is required');
         }
 
+        const scope = await ConfigLoader.getProfileScope(profileName, workingDir);
+
         // Confirmation
         if (!options.yes) {
-          const location = hasLocal ? 'local config' : 'global config';
+          const location = scope === 'local' ? 'local config' : 'global config';
           const { confirm } = await inquirer.prompt([
             {
               type: 'confirm',
@@ -416,7 +413,8 @@ function createDeleteCommand(): Command {
         }
 
         await ConfigLoader.deleteProfile(profileName, workingDir);
-        console.log(chalk.green(`\n✓ Profile "${profileName}" deleted\n`));
+        const location = scope === 'local' ? 'local config' : 'global config';
+        console.log(chalk.green(`\n✓ Profile "${profileName}" deleted from ${location}\n`));
 
         // Check if any profiles remain
         const remainingProfiles = await ConfigLoader.listProfiles(workingDir);
