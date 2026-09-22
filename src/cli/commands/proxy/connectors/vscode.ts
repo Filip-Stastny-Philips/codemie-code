@@ -3,16 +3,16 @@ import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promis
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ConfigurationError } from '@/utils/errors.js';
+import { resolveTenantModelId } from './model-name-resolver.js';
+import { fetchTenantModelCatalog } from './tenant-catalog.js';
 import {
-  VS_CODE_SUPPORTED_MODELS,
+  VS_CODE_CAPABILITY_TABLE,
   type VsCodeApiType,
-  type VsCodeModelDefinition,
+  type VsCodeCapabilityEntry,
   type VsCodeReasoningEffort,
 } from './vscode-models.js';
 
 const SECRET_REFERENCE_PATTERN = /^\$\{input:chat\.lm\.secret\.[^}]+\}$/;
-const OPENAI_PROVIDER_PREFIX_PATTERN = /^openai\./i;
-const RELEASE_DATE_SUFFIX_PATTERN = /-\d{4}-\d{2}-\d{2}$/;
 
 interface VsCodeLanguageModelProvider {
   [key: string]: unknown;
@@ -49,6 +49,7 @@ interface VsCodeManagedModel {
 export interface WriteVsCodeConfigResult {
   configPath: string;
   requiresSecretConfiguration: boolean;
+  modelCount: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -107,66 +108,88 @@ function getApiPath(apiType: VsCodeApiType): string {
   return '/v1/chat/completions';
 }
 
-function getConfiguredModelDefinitions(
-  profileModel: string | undefined
-): readonly VsCodeModelDefinition[] {
-  const configuredModel = profileModel?.trim();
-  if (!configuredModel) return VS_CODE_SUPPORTED_MODELS;
+function buildManagedModel(
+  entry: VsCodeCapabilityEntry,
+  tenantId: string,
+  proxyUrl: string
+): VsCodeManagedModel {
+  const model: VsCodeManagedModel = {
+    id: tenantId,
+    name: tenantId,
+    url: new URL(getApiPath(entry.apiType), proxyUrl).toString(),
+    apiType: entry.apiType,
+    toolCalling: true,
+    vision: entry.vision,
+    streaming: true,
+    thinking: entry.thinking,
+    maxInputTokens: entry.maxInputTokens,
+    maxOutputTokens: entry.maxOutputTokens,
+  };
 
-  const modelWithoutProviderPrefix = configuredModel
-    .replace(OPENAI_PROVIDER_PREFIX_PATTERN, '');
-  const definition = VS_CODE_SUPPORTED_MODELS.find(candidate =>
-    candidate.id === configuredModel ||
-    candidate.id.replace(RELEASE_DATE_SUFFIX_PATTERN, '') === modelWithoutProviderPrefix
-  );
+  if (entry.adaptiveThinking) model.adaptiveThinking = true;
+  if (entry.zeroDataRetentionEnabled !== undefined) {
+    model.zeroDataRetentionEnabled = entry.zeroDataRetentionEnabled;
+  }
+  if (entry.modelOptions) model.modelOptions = entry.modelOptions;
+  if (entry.requestHeaders) model.requestHeaders = entry.requestHeaders;
+  if (entry.supportsReasoningEffort) {
+    model.supportsReasoningEffort = entry.supportsReasoningEffort;
+  }
+  if (entry.reasoningEffortFormat) {
+    model.reasoningEffortFormat = entry.reasoningEffortFormat;
+  }
 
-  if (!definition) return VS_CODE_SUPPORTED_MODELS;
-
-  // CodeMie gateway model IDs can be provider-qualified while VS Code needs the
-  // capability metadata from its versioned catalog entry. Register the gateway ID
-  // so the request reaches the deployment selected by the active profile.
-  return [{ ...definition, id: configuredModel }];
+  return model;
 }
 
-function buildManagedModels(
+/**
+ * Fetch the tenant's live model catalog and intersect it against the VS Code
+ * capability table via {@link resolveTenantModelId}. A capability family with
+ * no tenant match is silently dropped — the VS Code Copilot BYOK picker must
+ * never offer a model the tenant does not actually serve. Throws when the
+ * intersection is empty, mirroring `desktop.ts`'s zero-match throw.
+ *
+ * When `profileModel` names a model the active profile is pinned to (e.g. a
+ * provider-qualified id like `openai.gpt-5.6-sol`), and it resolves against
+ * the same tenant catalog, narrow the result to just that one entry instead
+ * of offering every family the tenant serves — the picker should show
+ * exactly what the profile is configured to use, under its real tenant id,
+ * rather than every reachable model. An unrecognized or unset `profileModel`
+ * falls back to the full intersected list.
+ */
+async function resolveManagedModels(
   proxyUrl: string,
+  gatewayKey: string,
   profileModel: string | undefined
-): VsCodeManagedModel[] {
-  return getConfiguredModelDefinitions(profileModel).map(definition => {
-    const model: VsCodeManagedModel = {
-      id: definition.id,
-      name: definition.id,
-      url: new URL(getApiPath(definition.apiType), proxyUrl).toString(),
-      apiType: definition.apiType,
-      toolCalling: true,
-      vision: definition.vision,
-      streaming: true,
-      thinking: definition.thinking,
-      maxInputTokens: definition.maxInputTokens,
-      maxOutputTokens: definition.maxOutputTokens,
-    };
+): Promise<VsCodeManagedModel[]> {
+  const catalog = await fetchTenantModelCatalog(proxyUrl, gatewayKey);
+  const models: VsCodeManagedModel[] = [];
+  for (const entry of VS_CODE_CAPABILITY_TABLE) {
+    const tenantId = resolveTenantModelId(entry.family, catalog);
+    if (!tenantId) continue;
+    models.push(buildManagedModel(entry, tenantId, proxyUrl));
+  }
+  if (models.length === 0) {
+    throw new ConfigurationError(
+      'Local proxy discovered tenant models, but none matched the CodeMie VS Code Copilot capability table.'
+    );
+  }
 
-    if (definition.adaptiveThinking) model.adaptiveThinking = true;
-    if (definition.zeroDataRetentionEnabled !== undefined) {
-      model.zeroDataRetentionEnabled = definition.zeroDataRetentionEnabled;
-    }
-    if (definition.modelOptions) model.modelOptions = definition.modelOptions;
-    if (definition.requestHeaders) model.requestHeaders = definition.requestHeaders;
-    if (definition.supportsReasoningEffort) {
-      model.supportsReasoningEffort = definition.supportsReasoningEffort;
-    }
-    if (definition.reasoningEffortFormat) {
-      model.reasoningEffortFormat = definition.reasoningEffortFormat;
-    }
+  const pinnedModel = profileModel?.trim();
+  if (pinnedModel) {
+    const pinnedTenantId = resolveTenantModelId(pinnedModel, catalog);
+    const pinnedManagedModel = pinnedTenantId
+      ? models.find(model => model.id === pinnedTenantId)
+      : undefined;
+    if (pinnedManagedModel) return [pinnedManagedModel];
+  }
 
-    return model;
-  });
+  return models;
 }
 
 function mergeManagedProviders(
   providers: VsCodeLanguageModelProvider[],
-  proxyUrl: string,
-  profileModel: string | undefined
+  models: VsCodeManagedModel[]
 ): { provider: VsCodeLanguageModelProvider; requiresSecretConfiguration: boolean } {
   const existingProvider = Object.assign({}, ...providers);
   const existingSettings = Object.assign(
@@ -182,7 +205,7 @@ function mergeManagedProviders(
     name: 'CodeMie',
     vendor: 'customendpoint',
     apiType: 'chat-completions',
-    models: buildManagedModels(proxyUrl, profileModel),
+    models,
   };
 
   // VS Code owns effort selections. Preserve them instead of racing with the editor.
@@ -253,12 +276,14 @@ export async function writeAtomically(configPath: string, content: string): Prom
 
 export async function writeVsCodeLanguageModelsConfig(
   proxyUrl: string,
+  gatewayKey: string,
   insiders = false,
   profileModel?: string
 ): Promise<WriteVsCodeConfigResult> {
   return writeVsCodeLanguageModelsConfigAtPath(
     getVsCodeLanguageModelsPath(insiders),
     proxyUrl,
+    gatewayKey,
     profileModel
   );
 }
@@ -266,9 +291,11 @@ export async function writeVsCodeLanguageModelsConfig(
 export async function writeVsCodeLanguageModelsConfigAtPath(
   configPath: string,
   proxyUrl: string,
+  gatewayKey: string,
   profileModel?: string
 ): Promise<WriteVsCodeConfigResult> {
   const providers = await readProviders(configPath);
+  const models = await resolveManagedModels(proxyUrl, gatewayKey, profileModel);
   const managedProviderIndexes = providers
     .map((provider, index) => isManagedProvider(provider) ? index : -1)
     .filter(index => index >= 0);
@@ -276,7 +303,7 @@ export async function writeVsCodeLanguageModelsConfigAtPath(
     .map(index => providers[index])
     .filter(isManagedProvider);
   const { provider: managedProvider, requiresSecretConfiguration } =
-    mergeManagedProviders(managedProviders, proxyUrl, profileModel);
+    mergeManagedProviders(managedProviders, models);
   const firstManagedProviderIndex = managedProviderIndexes[0] ?? providers.length;
   const managedProviderIndexSet = new Set(managedProviderIndexes);
   const reconciledProviders = providers.flatMap((provider, index) => {
@@ -295,5 +322,5 @@ export async function writeVsCodeLanguageModelsConfigAtPath(
     );
   }
 
-  return { configPath, requiresSecretConfiguration };
+  return { configPath, requiresSecretConfiguration, modelCount: models.length };
 }
