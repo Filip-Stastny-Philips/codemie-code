@@ -84,18 +84,40 @@ export class ConfigLoader {
     }
   }
 
+  private static getConfiguredActiveProfileName(config: MultiProviderConfig): string | null {
+    const profileName = config.activeProfile;
+    return profileName && config.profiles[profileName] ? profileName : null;
+  }
+
+  private static async loadLocalMultiProviderConfigIfAvailable(
+    workingDir: string
+  ): Promise<MultiProviderConfig | null> {
+    const localConfigPath = path.join(workingDir, this.LOCAL_CONFIG);
+    const rawConfig = await this.loadJsonConfig(localConfigPath);
+    return isMultiProviderConfig(rawConfig) ? rawConfig : null;
+  }
+
   private static async getEffectiveActiveProfileName(workingDir: string): Promise<string | null> {
     const globalConfig = await this.loadMultiProviderConfig();
-    if (!(await this.hasLocalConfig(workingDir))) {
-      return globalConfig.activeProfile || null;
+    const globalActiveProfileName = this.getConfiguredActiveProfileName(globalConfig);
+    const localConfig = await this.loadLocalMultiProviderConfigIfAvailable(workingDir);
+
+    if (!localConfig) {
+      return globalActiveProfileName;
     }
 
-    const localConfig = await this.loadLocalMultiProviderConfig(workingDir);
+    const localProfileName = localConfig.activeProfile;
+    const localActiveProfileName = localProfileName && (
+      localConfig.profiles[localProfileName] || globalConfig.profiles[localProfileName]
+    )
+      ? localProfileName
+      : null;
+
     if (localConfig.activeProfileScope === StorageScope.GLOBAL) {
-      return globalConfig.activeProfile || null;
+      return globalActiveProfileName ?? localActiveProfileName;
     }
 
-    return localConfig.activeProfile || globalConfig.activeProfile || null;
+    return localActiveProfileName ?? globalActiveProfileName;
   }
 
   /**
@@ -225,8 +247,8 @@ export class ConfigLoader {
     // e.g. from a hand-edited or externally-written config file — which is not a
     // valid WorkspaceConfig object and must fall back to the next scope rather than
     // being treated as "defined" and passed downstream to Object.entries().
-    const localMultiConfig = await this.loadLocalMultiProviderConfig(workingDir);
-    if (localMultiConfig.workspace != null) {
+    const localMultiConfig = await this.loadLocalMultiProviderConfigIfAvailable(workingDir);
+    if (localMultiConfig?.workspace != null) {
       return localMultiConfig.workspace;
     }
 
@@ -647,11 +669,19 @@ export class ConfigLoader {
     if (
       scope === StorageScope.GLOBAL
       && activeProfileName === profileName
-      && await this.hasLocalConfig(workingDir)
     ) {
-      const localConfig = await this.loadLocalMultiProviderConfig(workingDir);
-      localConfig.activeProfileScope = StorageScope.GLOBAL;
-      await this.saveLocalMultiProviderConfig(workingDir, localConfig);
+      const localConfig = await this.loadLocalMultiProviderConfigIfAvailable(workingDir);
+      if (localConfig) {
+        const nextGlobalActiveProfileName = this.getConfiguredActiveProfileName(config);
+        if (nextGlobalActiveProfileName) {
+          localConfig.activeProfileScope = StorageScope.GLOBAL;
+        } else if (localConfig.profiles[localConfig.activeProfile]) {
+          localConfig.activeProfileScope = StorageScope.LOCAL;
+        } else {
+          delete localConfig.activeProfileScope;
+        }
+        await this.saveLocalMultiProviderConfig(workingDir, localConfig);
+      }
     }
 
     return scope;
@@ -668,10 +698,12 @@ export class ConfigLoader {
     config.activeProfileScope = scope;
     await this.saveConfigByScope(scope, workingDir, config);
 
-    if (scope === StorageScope.GLOBAL && await this.hasLocalConfig(workingDir)) {
-      const localConfig = await this.loadLocalMultiProviderConfig(workingDir);
-      localConfig.activeProfileScope = StorageScope.GLOBAL;
-      await this.saveLocalMultiProviderConfig(workingDir, localConfig);
+    if (scope === StorageScope.GLOBAL) {
+      const localConfig = await this.loadLocalMultiProviderConfigIfAvailable(workingDir);
+      if (localConfig) {
+        localConfig.activeProfileScope = StorageScope.GLOBAL;
+        await this.saveLocalMultiProviderConfig(workingDir, localConfig);
+      }
     }
 
     return scope;
@@ -685,8 +717,8 @@ export class ConfigLoader {
     profileName: string,
     workingDir: string = process.cwd()
   ): Promise<StorageScope> {
-    const localConfig = await this.loadLocalMultiProviderConfig(workingDir);
-    if (localConfig.profiles[profileName]) {
+    const localConfig = await this.loadLocalMultiProviderConfigIfAvailable(workingDir);
+    if (localConfig?.profiles[profileName]) {
       return StorageScope.LOCAL;
     }
 
@@ -1206,8 +1238,8 @@ export class ConfigLoader {
     // supplied it (mirrors resolveWorkspace()'s own local-else-global rule) rather
     // than hardcoding 'project', so --show-sources doesn't misattribute a
     // global-scope-only workspace value to the local config.
-    const localWorkspaceScope = await this.loadLocalMultiProviderConfig(workingDir);
-    const workspaceSource: 'project' | 'global' = localWorkspaceScope.workspace != null ? 'project' : 'global';
+    const localWorkspaceScope = await this.loadLocalMultiProviderConfigIfAvailable(workingDir);
+    const workspaceSource: 'project' | 'global' = localWorkspaceScope?.workspace != null ? 'project' : 'global';
     const workspace = await this.resolveWorkspace(workingDir);
 
     const configs: ConfigLayer[] = [
