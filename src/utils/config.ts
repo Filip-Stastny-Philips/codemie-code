@@ -293,7 +293,7 @@ export class ConfigLoader {
 
       // Validate that active profile exists
       if (!profile) {
-        throw new Error('No active profile set. Run: codemie setup');
+        return {};
       }
 
       if (!rawConfig.profiles[profile]) {
@@ -672,10 +672,20 @@ export class ConfigLoader {
     ) {
       const localConfig = await this.loadLocalMultiProviderConfigIfAvailable(workingDir);
       if (localConfig) {
+        // A local active profile may refer to the global profile being deleted.
+        // Repair that dangling reference before deciding which scope remains active.
+        if (localConfig.activeProfile === profileName) {
+          const localProfileNames = Object.keys(localConfig.profiles);
+          localConfig.activeProfile = localProfileNames[0] ?? '';
+        }
+
         const nextGlobalActiveProfileName = this.getConfiguredActiveProfileName(config);
         if (nextGlobalActiveProfileName) {
           localConfig.activeProfileScope = StorageScope.GLOBAL;
-        } else if (localConfig.profiles[localConfig.activeProfile]) {
+        } else if (this.getConfiguredActiveProfileName(localConfig)) {
+          localConfig.activeProfileScope = StorageScope.LOCAL;
+        } else if (Object.keys(localConfig.profiles).length > 0) {
+          localConfig.activeProfile = Object.keys(localConfig.profiles)[0];
           localConfig.activeProfileScope = StorageScope.LOCAL;
         } else {
           delete localConfig.activeProfileScope;
