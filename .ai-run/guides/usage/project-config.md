@@ -60,7 +60,7 @@ project context, but it cannot replace the selected provider, model, or credenti
 | Differently named local profile; URLs differ | global (selected profile) | global (selected profile) |
 | `--profile <name>` with a same-named local profile | local overlay | local overlay |
 
-**Key rule**: `profile switch` and `profile delete` operate on the scope that defines the selected profile. A local profile with the same name as a global profile is the effective override and therefore takes precedence. Local configuration records when the effective selection comes from global scope, so its own active-profile default cannot mask that selection.
+**Key rule**: Profile names are unique across the system. `profile switch` stores the active profile selection in local config when `.codemie/` exists (for this repository only), or in global config otherwise; the referenced profile can be defined in either global or local scope. `profile delete` deletes from whichever scope (global or local) defines the profile, and repairs any active profile references.
 
 `file:src/utils/config.ts` — `loadWithSources()` implements the merge.
 

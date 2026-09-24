@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { ConfigLoader } from '../config.js';
-import { StorageScope, type MultiProviderConfig, type CodeMieIntegrationInfo } from '../../env/types.js';
+import type { MultiProviderConfig, CodeMieIntegrationInfo } from '../../env/types.js';
 import * as paths from '../paths.js';
 
 // Test utilities
@@ -176,7 +176,7 @@ describe('ConfigLoader - Project-Level Configuration', () => {
       await fs.writeFile(LOCAL_CONFIG_PATH, JSON.stringify(config, null, 2));
     }
 
-    it('switches a global profile in global config when local config exists', async () => {
+    it('switches to a global profile in local config without mutating global activeProfile when local config exists', async () => {
       const workingDir = path.join(TEST_DIR, 'project');
       await writeGlobalConfig({
         version: 2,
@@ -189,21 +189,19 @@ describe('ConfigLoader - Project-Level Configuration', () => {
       await writeLocalConfig({
         version: 2,
         activeProfile: 'local-default',
-        activeProfileScope: StorageScope.GLOBAL,
         profiles: { 'local-default': { provider: 'sso' } }
       });
 
-      await expect(ConfigLoader.switchProfile('global-work', workingDir)).resolves.toBe('global');
+      await expect(ConfigLoader.switchProfile('global-work', workingDir)).resolves.toBe('local');
 
       const globalConfig: MultiProviderConfig = JSON.parse(await fs.readFile(GLOBAL_CONFIG_PATH, 'utf-8'));
       const localConfig: MultiProviderConfig = JSON.parse(await fs.readFile(LOCAL_CONFIG_PATH, 'utf-8'));
-      expect(globalConfig.activeProfile).toBe('global-work');
-      expect(localConfig.activeProfile).toBe('local-default');
-      expect(localConfig.activeProfileScope).toBe('global');
+      expect(globalConfig.activeProfile).toBe('global-default');
+      expect(localConfig.activeProfile).toBe('global-work');
       await expect(ConfigLoader.getActiveProfileName(workingDir)).resolves.toBe('global-work');
     });
 
-    it('deletes a global profile from global config when local config exists', async () => {
+    it('deletes a global profile from global config and repairs dangling local reference', async () => {
       const workingDir = path.join(TEST_DIR, 'project');
       await writeGlobalConfig({
         version: 2,
@@ -215,8 +213,7 @@ describe('ConfigLoader - Project-Level Configuration', () => {
       });
       await writeLocalConfig({
         version: 2,
-        activeProfile: 'local-default',
-        activeProfileScope: StorageScope.GLOBAL,
+        activeProfile: 'global-work',
         profiles: { 'local-default': { provider: 'sso' } }
       });
 
@@ -227,33 +224,43 @@ describe('ConfigLoader - Project-Level Configuration', () => {
       expect(globalConfig.profiles['global-work']).toBeUndefined();
       expect(globalConfig.activeProfile).toBe('global-default');
       expect(localConfig.profiles['local-default']).toBeDefined();
-      expect(localConfig.activeProfileScope).toBe('global');
+      expect(localConfig.activeProfile).toBe('local-default');
     });
 
-    it('prefers the local definition when profile names overlap', async () => {
+    it('falls back to global active profile when local active profile is empty or non-existent', async () => {
       const workingDir = path.join(TEST_DIR, 'project');
       await writeGlobalConfig({
         version: 2,
-        activeProfile: 'shared',
-        profiles: { shared: { provider: 'sso' } }
+        activeProfile: 'global-default',
+        profiles: {
+          'global-default': { provider: 'sso' }
+        }
       });
       await writeLocalConfig({
         version: 2,
-        activeProfile: 'local-default',
+        activeProfile: 'non-existent',
+        profiles: {}
+      });
+
+      await expect(ConfigLoader.getActiveProfileName(workingDir)).resolves.toBe('global-default');
+    });
+
+    it('switches active profile in global config when local config does not exist', async () => {
+      const nonProjectDir = path.join(TEST_DIR, 'no-project');
+      await writeGlobalConfig({
+        version: 2,
+        activeProfile: 'global-default',
         profiles: {
-          'local-default': { provider: 'sso' },
-          shared: { provider: 'bedrock' }
+          'global-default': { provider: 'sso' },
+          'global-work': { provider: 'bedrock' }
         }
       });
 
-      await expect(ConfigLoader.getProfileScope('shared', workingDir)).resolves.toBe('local');
-      await expect(ConfigLoader.switchProfile('shared', workingDir)).resolves.toBe('local');
+      await expect(ConfigLoader.switchProfile('global-work', nonProjectDir)).resolves.toBe('global');
 
       const globalConfig: MultiProviderConfig = JSON.parse(await fs.readFile(GLOBAL_CONFIG_PATH, 'utf-8'));
-      const localConfig: MultiProviderConfig = JSON.parse(await fs.readFile(LOCAL_CONFIG_PATH, 'utf-8'));
-      expect(globalConfig.activeProfile).toBe('shared');
-      expect(localConfig.activeProfile).toBe('shared');
-      expect(localConfig.activeProfileScope).toBe('local');
+      expect(globalConfig.activeProfile).toBe('global-work');
+      await expect(ConfigLoader.getActiveProfileName(nonProjectDir)).resolves.toBe('global-work');
     });
   });
 
