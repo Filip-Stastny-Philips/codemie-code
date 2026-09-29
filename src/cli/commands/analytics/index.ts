@@ -17,6 +17,12 @@ import { OtelSource } from './sources/otel-source.js';
 import type { AnalyticsSource } from './sources/types.js';
 import { ConfigLoader } from '../../../utils/config.js';
 
+/**
+ * Date on which the deprecated analytics report flags (`--report`, `--report-format`,
+ * `--report-output`) will be removed.
+ */
+const LEGACY_FLAGS_REMOVAL_DATE = 'November 1, 2026';
+
 export function createAnalyticsCommand(): Command {
   const command = new Command('analytics')
     .description('Display aggregated metrics and analytics from sessions');
@@ -58,20 +64,46 @@ function applyCommonOptions(command: Command): Command {
     .option('--export [format]', 'Write report: html (default), json, or both')
     .option('-o, --output <path>', 'Output file or directory (default: ./codemie-analytics-YYYY-MM-DD.{ext})')
     .option('--open', 'Open the generated HTML report in the default browser')
-    .option('--report-output <path>', 'Deprecated: use -o/--output instead');
+    .option('--report', `Deprecated: use --export instead (removal planned for ${LEGACY_FLAGS_REMOVAL_DATE})`)
+    .option('--report-format <format>', `Deprecated: use --export [format] instead (removal planned for ${LEGACY_FLAGS_REMOVAL_DATE})`)
+    .option('--report-output <path>', `Deprecated: use -o/--output instead (removal planned for ${LEGACY_FLAGS_REMOVAL_DATE})`);
 }
 
 export async function runAnalytics(options: AnalyticsOptions, source: AnalyticsSource): Promise<void> {
   try {
-    // Deprecated `--report-output <path>` aliases to -o/--output (removed in 1144b247d,
-    // restored as an alias so existing scripts keep working). Explicit -o/--output wins.
+    // Deprecated flags removed in 1144b247d, restored as aliases so existing scripts keep
+    // working. Each prints a warning pointing at its replacement; the new flag wins when both
+    // are set:
+    //   --report              -> bare --export (html)
+    //   --report-format <fmt> -> --export [format]
+    //   --report-output <p>   -> -o/--output <p>
+    //
+    // TODO: retire these aliases on LEGACY_FLAGS_REMOVAL_DATE — drop the three .option()
+    // registrations, this whole mapping block, and the report/reportFormat/reportOutput
+    // fields in types.ts.
     let output = options.output;
     if (options.reportOutput !== undefined) {
       if (output === undefined) {
-        console.log(chalk.yellow('\n! --report-output is deprecated; use -o/--output instead.'));
+        console.log(chalk.yellow(`\n! --report-output is deprecated; use -o/--output instead (will be removed on ${LEGACY_FLAGS_REMOVAL_DATE}).`));
         output = options.reportOutput;
       } else {
         console.log(chalk.yellow('\n! --report-output is deprecated and ignored; -o/--output takes precedence.'));
+      }
+    }
+
+    let exportOpt = options.export;
+    if (options.reportFormat !== undefined) {
+      if (exportOpt === undefined) {
+        console.log(chalk.yellow(`\n! --report-format is deprecated; use --export [format] instead (will be removed on ${LEGACY_FLAGS_REMOVAL_DATE}).`));
+        exportOpt = options.reportFormat;
+      } else {
+        console.log(chalk.yellow('\n! --report-format is deprecated and ignored; --export takes precedence.'));
+      }
+    }
+    if (options.report) {
+      console.log(chalk.yellow(`\n! --report is deprecated; use --export instead (will be removed on ${LEGACY_FLAGS_REMOVAL_DATE}; html is the default format).`));
+      if (exportOpt === undefined) {
+        exportOpt = true;
       }
     }
 
@@ -83,8 +115,8 @@ export async function runAnalytics(options: AnalyticsOptions, source: AnalyticsS
     // target, other) -> html.
     const openFlag = Boolean(options.open);
     let exportFormat: ExportFormat | undefined;
-    if (options.export !== undefined) {
-      const rawFormat = options.export === true ? 'html' : options.export.toLowerCase();
+    if (exportOpt !== undefined) {
+      const rawFormat = exportOpt === true ? 'html' : exportOpt.toLowerCase();
       if (rawFormat === 'html' || rawFormat === 'json' || rawFormat === 'both') {
         exportFormat = rawFormat;
       } else {
