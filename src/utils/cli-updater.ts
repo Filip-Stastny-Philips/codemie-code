@@ -17,11 +17,12 @@ import inquirer from 'inquirer';
 import { fileURLToPath } from 'url';
 import { logger } from './logger.js';
 import { getLatestVersion, installGlobal } from './processes.js';
+import { getNpmPrefixArgs } from './npm-prefix.js';
 import { compareVersions, isValidSemanticVersion } from './version-utils.js';
 import { getCodemiePath } from './paths.js';
 import { parseBooleanEnv } from './env.js';
 
-const CLI_PACKAGE_NAME = '@codemieai/code';
+export const CLI_PACKAGE_NAME = '@codemieai/code';
 
 // Rate limiting: Check for updates at most once per interval (default: 24 hours)
 const UPDATE_CHECK_INTERVAL = parseInt(
@@ -299,8 +300,10 @@ export async function updateCli(latestVersion: string, silent = false): Promise<
     console.log();
     console.error(chalk.red('✗ Failed to update CodeMie CLI'));
     console.log();
+    const [, prefix] = await getNpmPrefixArgs();
+    const prefixFlag = prefix ? ` --prefix "${prefix}"` : '';
     console.log(chalk.yellow('  You can manually update with:'));
-    console.log(chalk.white(`    npm install -g ${CLI_PACKAGE_NAME}@${latestVersion}`));
+    console.log(chalk.white(`    npm install -g ${CLI_PACKAGE_NAME}@${latestVersion}${prefixFlag}`));
     console.log();
     console.log(chalk.dim('  💡 To disable auto-update: export CODEMIE_AUTO_UPDATE=false'));
     console.log();

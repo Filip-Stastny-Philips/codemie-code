@@ -11,6 +11,7 @@ import os from 'node:os';
 import { logger } from './logger.js';
 import { exec, type ExecOptions, type ExecResult } from './exec.js';
 import { extractRepository } from './paths.js';
+import { getNpmPrefixArgs } from '@/utils/npm-prefix.js';
 
 const execAsync = promisify(childProcessExec);
 
@@ -157,7 +158,7 @@ export async function installGlobal(
       shell: isWindows // npm is a .cmd file on Windows
     };
 
-    const args = ['install', '-g'];
+    const args = ['install', '-g', ...(await getNpmPrefixArgs())];
     if (options.force) {
       args.push('--force');
     }
@@ -207,7 +208,8 @@ export async function uninstallGlobal(
       shell: isWindows // npm is a .cmd file on Windows
     };
 
-    const result = await exec('npm', ['uninstall', '-g', packageName], execOptions);
+    const args = ['uninstall', '-g', ...(await getNpmPrefixArgs()), packageName];
+    const result = await exec('npm', args, execOptions);
 
     if (result.code !== 0) {
       throw new Error(
@@ -252,7 +254,8 @@ export async function listGlobal(
       shell: isWindows // npm is a .cmd file on Windows
     };
 
-    const result = await exec('npm', ['list', '-g', packageName], execOptions);
+    const args = ['list', '-g', ...(await getNpmPrefixArgs()), packageName];
+    const result = await exec('npm', args, execOptions);
     // Exit code 0 = installed, 1 = not found, >1 = error
     return result.code === 0;
   } catch {
