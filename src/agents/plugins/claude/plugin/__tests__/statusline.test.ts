@@ -7,6 +7,7 @@ import {
   extractBasicInfo,
   formatDuration,
   buildStatusLine,
+  truncate,
   resolveBudget,
   isMainModule,
   ctxBar,
@@ -170,11 +171,52 @@ describe('ctxBar', () => {
   });
 });
 
+describe('truncate', () => {
+  it('returns text within the limit untouched', () => {
+    expect(truncate('short', 10)).toBe('short');
+    expect(truncate('a'.repeat(10), 10)).toBe('a'.repeat(10));
+  });
+
+  it('cuts longer text to max-1 characters plus an ellipsis', () => {
+    const out = truncate('a'.repeat(30), 10);
+    expect(out).toBe(`${'a'.repeat(9)}…`);
+    expect(Array.from(out)).toHaveLength(10);
+  });
+
+  it('returns an empty string for non-string or empty input', () => {
+    expect(truncate(undefined, 10)).toBe('');
+    expect(truncate(null, 10)).toBe('');
+    expect(truncate(42, 10)).toBe('');
+    expect(truncate('', 10)).toBe('');
+  });
+});
+
 describe('buildStatusLine', () => {
   const basic = {
     projectName: 'my-project', branch: 'main', model: 'Claude Sonnet 5',
     ctxPct: 42, cost: 1.5, costExact: true, durationMs: 65000,
   };
+  const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+  const stripAnsi = (s: string) => s.replace(ANSI_RE, '');
+
+  it('truncates a long branch to 20 characters inside the parens and keeps the cost visible', () => {
+    const branch = 'feature/EPMCDME-15429-' + 'x'.repeat(23);
+    expect(branch.length).toBe(45);
+    const plain = stripAnsi(buildStatusLine({ ...basic, branch }));
+    const inner = plain.match(/\(([^)]*)\)/)![1];
+    expect(Array.from(inner)).toHaveLength(20);
+    expect(inner.endsWith('…')).toBe(true);
+    expect(plain).not.toContain(branch);
+    expect(plain).toContain('$1.5000');
+  });
+
+  it('truncates a long project name to 20 characters inside the brackets and keeps the cost visible', () => {
+    const plain = stripAnsi(buildStatusLine({ ...basic, projectName: 'p'.repeat(27) }));
+    const inner = plain.match(/^\[([^\]]*)\]/)![1];
+    expect(Array.from(inner)).toHaveLength(20);
+    expect(inner.endsWith('…')).toBe(true);
+    expect(plain).toContain('$1.5000');
+  });
 
   it('always renders basic info (including session cost and duration)', () => {
     const line = buildStatusLine({ ...basic });
@@ -203,6 +245,26 @@ describe('buildStatusLine', () => {
     expect(line).toContain(`${YELLOW}$12.34 (41%) resets 7/15/2026`);
     expect(line.indexOf('[my-project]')).toBeLessThan(line.indexOf('$12.34'));
     expect(line.indexOf('$12.34')).toBeLessThan(line.indexOf('(main)'));
+    expect(line.indexOf('(main)')).toBeLessThan(line.indexOf('$1.5000'));
+    expect(line.indexOf('[Claude Sonnet 5]')).toBeLessThan(line.indexOf('$1.5000'));
+    expect(line.indexOf('$1.5000')).toBeLessThan(line.indexOf('████░░░░░░'));
+  });
+
+  it('keeps the session cost within the first 110 columns in the worst case', () => {
+    const line = buildStatusLine({
+      ...basic,
+      projectName: 'p'.repeat(60),
+      branch: 'b'.repeat(80),
+      budget: { text: '$12.34 (41%) resets 7/15/2026', pct: 41 },
+      tokIn: 1234,
+      tokOut: 56,
+    });
+    const plain = stripAnsi(line);
+    expect(plain.indexOf('$1.5000') + '$1.5000'.length).toBeLessThanOrEqual(110);
+    const costAt = line.indexOf('$1.5000');
+    expect(costAt).toBeLessThan(line.indexOf('████░░░░░░'));
+    expect(costAt).toBeLessThan(line.indexOf('in:'));
+    expect(costAt).toBeLessThan(line.indexOf('1m 5s'));
   });
 
   it('shows the budget error only when there is no budget', () => {
