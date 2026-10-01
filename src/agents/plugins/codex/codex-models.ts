@@ -80,7 +80,7 @@ const INCOMPATIBLE_MODEL_PATTERNS: RegExp[] = [
 const COMPATIBLE_CODEX_MODEL_PATTERNS: RegExp[] = [
   /codex/i,
   /^gpt[-.]?5(?:[-.]|\b)/i,
-  /^gpt[-.]?6(?:[-.]|\b)/i,
+  /gpt[-.]?6(?:[-.]|\b)/i,
   // Fallback for router/switchyard aliases that don't carry the catalog's `is_router` flag
   // (e.g. a plain LiteLLM alias): `gpt-smart-router`, `gpt-fast-router`. Real Switchyard
   // routers are matched via isRouterCatalogEntry below instead, since their names don't
@@ -314,6 +314,10 @@ function compareRankedModels(a: RankedModel, b: RankedModel): number {
   return a.id.localeCompare(b.id);
 }
 
+function getCodexContextWindow(id: string): number {
+  return /gpt[-.]?6(?:[-.]|\b)/i.test(id) ? 1050000 : 400000;
+}
+
 /**
  * Codex's own model picker (as of codex-cli 0.154.0) ignores a catalog entry's
  * `display_name` entirely — see https://github.com/openai/codex/issues/46183 — and renders
@@ -359,8 +363,8 @@ function buildCodexCatalog(models: RankedModel[], labelIndex: Map<string, string
       },
       supports_parallel_tool_calls: true,
       supports_image_detail_original: true,
-      context_window: 400000,
-      max_context_window: 400000,
+      context_window: getCodexContextWindow(entry.id),
+      max_context_window: getCodexContextWindow(entry.id),
       effective_context_window_percent: 95,
       experimental_supported_tools: [],
       input_modalities: entry.model.multimodal ? ['text', 'image'] : ['text'],
