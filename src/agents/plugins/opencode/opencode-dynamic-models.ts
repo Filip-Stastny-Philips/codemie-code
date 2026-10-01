@@ -45,6 +45,7 @@ const RESPONSES_API_MODEL_PATTERNS: RegExp[] = [
   /^gpt-5\.5-/,       // gpt-5.5-2026-04-24 — same Azure restriction as gpt-5.4
   /^gpt-5-5-/,        // hyphenated variant of gpt-5.5-*
   /gpt-5[.-]6/,       // gpt-5.6-* (e.g. openai.gpt-5.6-luna) — same Azure restriction (tools + reasoning_effort)
+  /gpt-6/,            // gpt-6.1, gpt-6-sol and other GPT-6 variants
 ];
 
 function isResponsesApiModel(id: string): boolean {
@@ -57,6 +58,7 @@ function detectFamily(id: string): string {
   if (id.startsWith('claude')) return 'claude-4';
   if (id.startsWith('gemini')) return 'gemini-2';
   if (id.startsWith('gpt-4')) return 'gpt-4';
+  if (/gpt-6/.test(id)) return 'gpt-6';
   if (id.startsWith('gpt-5') || /gpt-5[.-]6/.test(id)) return 'gpt-5';
   if (/^o[134]-/.test(id) || id === 'o1') return 'openai-reasoning';
   if (id.startsWith('qwen')) return 'qwen3';
@@ -75,6 +77,7 @@ function detectLimits(id: string, family: string): { context: number; output: nu
   if (family === 'gemini-2' || id.startsWith('gemini')) return { context: 1048576, output: 65536 };
   if (id.startsWith('gpt-4.1')) return { context: 1048576, output: 32768 };
   if (id.startsWith('gpt-4o')) return { context: 128000, output: 16384 };
+  if (/gpt-6/.test(id)) return { context: 1050000, output: 128000 }; // Azure-published window for GPT-6
   if (id.startsWith('gpt-5.5') || id.startsWith('gpt-5-5')) return { context: 1050000, output: 128000 }; // Azure-published window for gpt-5.5
   if (/gpt-5[.-]6/.test(id)) return { context: 1050000, output: 128000 }; // Azure-published window for gpt-5.6
   if (id.startsWith('gpt-5')) return { context: 400000, output: 128000 };
