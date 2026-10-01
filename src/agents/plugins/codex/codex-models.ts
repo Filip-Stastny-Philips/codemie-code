@@ -314,10 +314,6 @@ function compareRankedModels(a: RankedModel, b: RankedModel): number {
   return a.id.localeCompare(b.id);
 }
 
-function getCodexContextWindow(id: string): number {
-  return /gpt[-.]?6(?:[-.]|\b)/i.test(id) ? 1050000 : 400000;
-}
-
 /**
  * Codex's own model picker (as of codex-cli 0.154.0) ignores a catalog entry's
  * `display_name` entirely — see https://github.com/openai/codex/issues/46183 — and renders
@@ -363,8 +359,8 @@ function buildCodexCatalog(models: RankedModel[], labelIndex: Map<string, string
       },
       supports_parallel_tool_calls: true,
       supports_image_detail_original: true,
-      context_window: getCodexContextWindow(entry.id),
-      max_context_window: getCodexContextWindow(entry.id),
+      context_window: /gpt[-.]?6(?:[-.]|\b)/i.test(entry.id) ? 1050000 : 400000,
+      max_context_window: /gpt[-.]?6(?:[-.]|\b)/i.test(entry.id) ? 1050000 : 400000,
       effective_context_window_percent: 95,
       experimental_supported_tools: [],
       input_modalities: entry.model.multimodal ? ['text', 'image'] : ['text'],
