@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import { ConfigLoader } from '../../../utils/config.js';
 import { ConfigurationError } from '../../../utils/errors.js';
@@ -22,6 +22,7 @@ import {
   connectTargets,
   type RequestedDaemonConfig,
 } from './connect-orchestrator.js';
+import { CLAUDE_CODE_OTLP_AGENT_NAME } from '@/agents/plugins/claude-code-otlp/claude-code-otlp.constants.js';
 
 const DEFAULT_DESKTOP_INSPECT_LIMIT = 5;
 
@@ -31,15 +32,17 @@ interface ProxyStartOptions {
 }
 
 interface UnifiedConnectOptions {
+  claudeCodeOtlp?: boolean;
   claudeDesktop?: boolean;
-  vscode?: boolean;
-  vscodeClaudeCode?: boolean;
   codexDesktop?: boolean;
-  profile?: string;
   force?: boolean;
-  verbose?: boolean;
   insiders?: boolean;
   model?: string;
+  profile?: string;
+  scope?: "user" | "project";
+  verbose?: boolean;
+  vscode?: boolean;
+  vscodeClaudeCode?: boolean;
 }
 
 interface AliasConnectOptions {
@@ -297,9 +300,19 @@ export function createProxyCommand(): Command {
     .option('--force', 'Stop any existing proxy and start a fresh one, even if it looks healthy')
     .option('--verbose', 'Show detailed connection info (URLs, config paths) for debugging')
     .option('--insiders', 'Target VS Code Insiders (applies to --vscode / --vscode-claude-code)')
+    .option(`--${CLAUDE_CODE_OTLP_AGENT_NAME}`, 'Configure Claude Code analytics hooks and OTLP settings')
+    .addOption(
+      new Option(
+        '--scope <scope>',
+        `Settings scope for --${CLAUDE_CODE_OTLP_AGENT_NAME}: "user" (default) or "project"`,
+      )
+      .default('user')
+      .choices(['user', 'project']),
+    )
     .action(async (opts: UnifiedConnectOptions) => {
       await connectTargets({
         targets: {
+          claudeCodeOtlp: Boolean(opts.claudeCodeOtlp),
           claudeDesktop: Boolean(opts.claudeDesktop),
           vscode: Boolean(opts.vscode),
           vscodeClaudeCode: Boolean(opts.vscodeClaudeCode),
@@ -310,6 +323,7 @@ export function createProxyCommand(): Command {
         force: Boolean(opts.force),
         verbose: Boolean(opts.verbose),
         model: opts.model,
+        scope: opts.scope,
       });
     });
 
@@ -317,8 +331,23 @@ export function createProxyCommand(): Command {
     .command('disconnect')
     .description('Remove CodeMie proxy configuration from a client')
     .option('--codex-desktop', 'Remove the CodeMie block from ~/.codex/config.toml')
-    .action(async (opts: { codexDesktop?: boolean }) => {
-      await disconnectTargets({ targets: { codexDesktop: Boolean(opts.codexDesktop) } });
+    .option(`--${CLAUDE_CODE_OTLP_AGENT_NAME}`, 'Configure Claude Code analytics hooks and OTLP settings')
+    .addOption(
+      new Option(
+        '--scope <scope>',
+        `Settings scope for --${CLAUDE_CODE_OTLP_AGENT_NAME}: "user" (default) or "project"`,
+      )
+      .default('user')
+      .choices(['user', 'project']),
+    )
+    .action(async (opts: { claudeCodeOtlp?: boolean; codexDesktop?: boolean; scope?: 'user' | 'project' }) => {
+      await disconnectTargets({
+        targets: {
+          claudeCodeOtlp: Boolean(opts.claudeCodeOtlp),
+          codexDesktop: Boolean(opts.codexDesktop),
+        },
+        scope: opts.scope,
+      });
     });
 
   // Deprecated aliases — kept working, mapped onto the unified target flags.
