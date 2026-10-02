@@ -79,7 +79,7 @@ const INCOMPATIBLE_MODEL_PATTERNS: RegExp[] = [
 
 const COMPATIBLE_CODEX_MODEL_PATTERNS: RegExp[] = [
   /codex/i,
-  /^gpt[-.]?5(?:[-.]|\b)/i,
+  /gpt[-.]?5(?:[-.]|\b)/i,
   /gpt[-.]?6(?:[-.]|\b)/i,
   // Fallback for router/switchyard aliases that don't carry the catalog's `is_router` flag
   // (e.g. a plain LiteLLM alias): `gpt-smart-router`, `gpt-fast-router`. Real Switchyard
