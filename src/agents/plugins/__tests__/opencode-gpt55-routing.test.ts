@@ -152,9 +152,24 @@ describe('GPT-5.6 → Responses API routing', () => {
 
   it('dynamic GPT-5.6 config preserves the complete effort-level map', () => {
     const config = convertApiModelToOpenCodeConfig(makeLlmModel('openai.gpt-5.6-luna'));
-    expect(Object.keys(config.variants ?? {})).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+    expect(Object.keys(config.variants ?? {})).toEqual(['minimal', 'none', 'low', 'medium', 'high', 'xhigh', 'max']);
+    expect(config.variants?.minimal?.reasoningEffort).toBe('none');
+    expect(config.variants?.none?.reasoningEffort).toBe('none');
     expect(config.variants?.xhigh?.reasoningEffort).toBe('xhigh');
     expect(config.variants?.max?.reasoningEffort).toBe('max');
+  });
+
+  it.each([
+    ['gpt-5.6-luna', 'none'],
+    ['gpt-5.6-terra', 'none'],
+    ['gpt-6-sol', 'none'],
+    ['gpt-6-luna', 'none'],
+    ['gpt-6-astra', 'low'],
+    ['gpt-6.1-sol', 'low'],
+  ])('%s maps CodeMie minimal to native %s', (modelId, nativeMinimal) => {
+    const config = convertApiModelToOpenCodeConfig(makeLlmModel(modelId));
+    expect(config.use_responses_api).toBe(true);
+    expect(config.variants?.minimal?.reasoningEffort).toBe(nativeMinimal);
   });
 
   // ── Static fallback path (OPENCODE_MODEL_CONFIGS) ──────────────────────────
@@ -174,6 +189,7 @@ describe('GPT-5.6 → Responses API routing', () => {
 
   it('static GPT-5.6 config preserves xhigh and max', () => {
     const variants = OPENCODE_MODEL_CONFIGS['gpt-5.6-sol-2026-07-09']!.variants;
+    expect(variants?.minimal?.reasoningEffort).toBe('none');
     expect(variants?.xhigh?.reasoningEffort).toBe('xhigh');
     expect(variants?.max?.reasoningEffort).toBe('max');
   });

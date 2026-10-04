@@ -82,16 +82,28 @@ function detectLimits(id: string): { contextWindow: number; maxTokens: number } 
   return { contextWindow: 128000, maxTokens: 4096 };
 }
 
-function defaultThinkingLevelMap(): Record<string, string | null> {
+function defaultThinkingLevelMap(minimalTarget = 'minimal'): Record<string, string | null> {
   return {
     off: null,
-    minimal: 'minimal',
+    minimal: minimalTarget,
     low: 'low',
     medium: 'medium',
     high: 'high',
     xhigh: 'xhigh',
     max: 'max',
   };
+}
+
+function thinkingLevelMapForModel(id: string): Record<string, string | null> {
+  if (/gpt-5[.-]6(?:[.-]|$)/.test(id) || /gpt-6(?:[.-](?:sol|luna)|$)/.test(id)) {
+    return defaultThinkingLevelMap('none');
+  }
+
+  if (/gpt-6[.-]astra(?:[.-]|$)/.test(id) || /gpt-6[.-]1(?:[.-]|$)/.test(id)) {
+    return defaultThinkingLevelMap('low');
+  }
+
+  return defaultThinkingLevelMap();
 }
 
 function isReasoningModel(id: string): boolean {
@@ -220,7 +232,7 @@ export function convertLlmModelToPiEntry(model: LlmModel): PiModelEntry {
 
   if (isReasoningModel(id)) {
     entry.reasoning = true;
-    entry.thinkingLevelMap = defaultThinkingLevelMap();
+    entry.thinkingLevelMap = thinkingLevelMapForModel(id);
   }
 
   if (
