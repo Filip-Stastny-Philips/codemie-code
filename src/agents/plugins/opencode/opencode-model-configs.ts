@@ -56,12 +56,12 @@ export interface OpenCodeModelConfig {
   variants?: Record<string, Record<string, unknown>>;
 }
 
-const GPT_56_REASONING_LEVELS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-const GPT_6_LOWEST_REASONING_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const GPT_5_6_REASONING_LEVELS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+const GPT_6_REASONING_LEVELS_FROM_LOW = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 function getNativeReasoningLevels(modelId: string): readonly string[] | undefined {
   if (/gpt-5[.-]6(?:[.-]|$)/.test(modelId)) {
-    return GPT_56_REASONING_LEVELS;
+    return GPT_5_6_REASONING_LEVELS;
   }
 
   // GPT-6 Astra and GPT-6.1 Sol do not expose either `none` or `minimal`.
@@ -69,12 +69,12 @@ function getNativeReasoningLevels(modelId: string): readonly string[] | undefine
     /gpt-6[.-]astra(?:[.-]|$)/.test(modelId) ||
     /gpt-6[.-]1(?:[.-]|$)/.test(modelId)
   ) {
-    return GPT_6_LOWEST_REASONING_LEVELS;
+    return GPT_6_REASONING_LEVELS_FROM_LOW;
   }
 
   // GPT-6 Sol and Luna expose `none`, but not `minimal`.
   if (/gpt-6(?:[.-]|$)/.test(modelId)) {
-    return GPT_56_REASONING_LEVELS;
+    return GPT_5_6_REASONING_LEVELS;
   }
 
   return undefined;
