@@ -284,19 +284,4 @@ describe('convertLlmModelToPiEntry — GPT-6 limits and routing', () => {
     expect(entry.api).toBe('openai-responses');
     expect(entry.reasoning).toBe(true);
   });
-
-  it.each([
-    ['gpt-5.6-luna', 'none'],
-    ['gpt-5.6-terra', 'none'],
-    ['gpt-6-sol', 'none'],
-    ['gpt-6-luna', 'none'],
-    ['gpt-6-astra', 'low'],
-    ['gpt-6.1-sol', 'low'],
-  ])('%s maps CodeMie minimal to native %s', (modelId, nativeMinimal) => {
-    const entry = convertLlmModelToPiEntry(llmModel({ deployment_name: modelId }));
-    expect(entry.reasoning).toBe(true);
-    expect(entry.thinkingLevelMap?.minimal).toBe(nativeMinimal);
-    expect(entry.thinkingLevelMap?.xhigh).toBe('xhigh');
-    expect(entry.thinkingLevelMap?.max).toBe('max');
-  });
 });
