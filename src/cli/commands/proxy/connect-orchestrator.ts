@@ -600,13 +600,14 @@ async function runCodexDesktop(
   const label = 'Codex Desktop';
   try {
     const candidates = getCodexDesktopAppCandidates();
-    if (!findCodexDesktopApp(candidates) && !options.force) {
+    if (!options.force && !(await findCodexDesktopApp(candidates))) {
       throw new ConfigurationError(
         candidates.length === 0
           ? `The Codex desktop app is not supported on ${process.platform} ` +
             '(macOS and Windows only). Re-run with --force to write the config anyway.'
           : 'Could not find the ChatGPT desktop app (which ships Codex). Looked in: ' +
             `${candidates.join(', ')}. ` +
+            (process.platform === 'win32' ? 'Also queried the current user\'s OpenAI.Codex MSIX package. ' : '') +
             'Install it, or re-run with --force to write the config anyway.'
       );
     }
