@@ -11,7 +11,6 @@ import type { ProxyPlugin, PluginContext, ProxyInterceptor, UpstreamResponseTool
 import type { ProxyContext } from '../proxy-types.js';
 import type { SSOCredentials } from '@/providers/core/types.js';
 import { CodeMieSSO } from '@/providers/plugins/sso/sso.auth.js';
-import { describeLogin, startDetachedSsoLogin } from '@/providers/plugins/sso/sso.detached-login.js';
 import { logger } from '@/utils/logger.js';
 import { AuthenticationError } from '../proxy-errors.js';
 import { markAnalyticsAuthInvalid } from '@/utils/analytics-auth-status.js';
@@ -140,13 +139,12 @@ class SSOAuthInterceptor implements ProxyInterceptor {
     // JSON error. This also releases the pooled connection promptly.
     response.resume();
     await markAnalyticsAuthInvalid(reason, this.credentials.apiUrl);
-    const loginOutcome = await startDetachedSsoLogin(this.credentials.apiUrl);
 
     const body = Buffer.from(JSON.stringify({
       error: {
         type: 'authentication_error',
         code: 'AUTH_FAILED',
-        message: `CodeMie SSO session expired. ${describeLogin(loginOutcome)}`,
+        message: 'CodeMie SSO session expired. Run `codemie profile login`, then re-send your prompt in the same session.',
       },
     }));
     const replacement = tools.fromBuffer(response, body);
