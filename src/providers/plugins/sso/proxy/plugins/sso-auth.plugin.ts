@@ -2,17 +2,19 @@
  * SSO Authentication Plugin
  * Priority: 10 (must run first)
  *
- * SOLID: Single responsibility = inject SSO cookies
+ * SOLID: Single responsibility = maintain SSO authentication
  * KISS: Simple interceptor, one clear purpose
  */
 
-import { IncomingMessage } from 'http';
-import { ProxyPlugin, PluginContext, ProxyInterceptor, UpstreamResponseTools } from './types.js';
-import { ProxyContext } from '../proxy-types.js';
-import { SSOCredentials } from '../../../../core/types.js';
-import { logger } from '../../../../../utils/logger.js';
+import type { IncomingMessage } from 'node:http';
+import type { ProxyPlugin, PluginContext, ProxyInterceptor, UpstreamResponseTools } from './types.js';
+import type { ProxyContext } from '../proxy-types.js';
+import type { SSOCredentials } from '@/providers/core/types.js';
+import { CodeMieSSO } from '@/providers/plugins/sso/sso.auth.js';
+import { describeLogin, startDetachedSsoLogin } from '@/providers/plugins/sso/sso.detached-login.js';
+import { logger } from '@/utils/logger.js';
 import { AuthenticationError } from '../proxy-errors.js';
-import { markAnalyticsAuthInvalid } from '../../../../../utils/analytics-auth-status.js';
+import { markAnalyticsAuthInvalid } from '@/utils/analytics-auth-status.js';
 
 export class SSOAuthPlugin implements ProxyPlugin {
   id = '@codemie/proxy-sso-auth';
@@ -26,7 +28,10 @@ export class SSOAuthPlugin implements ProxyPlugin {
       return new NoOpInterceptor('sso-auth');
     }
 
-    return new SSOAuthInterceptor(context.credentials as SSOCredentials);
+    const syncCredentials = context.syncCredentials && 'cookies' in context.syncCredentials
+      ? context.syncCredentials
+      : undefined;
+    return new SSOAuthInterceptor(context.credentials, syncCredentials);
   }
 }
 
@@ -41,7 +46,10 @@ class NoOpInterceptor implements ProxyInterceptor {
 class SSOAuthInterceptor implements ProxyInterceptor {
   name = 'sso-auth';
 
-  constructor(private credentials: SSOCredentials) {}
+  constructor(
+    private credentials: SSOCredentials,
+    private syncCredentials?: SSOCredentials,
+  ) {}
 
   private hasInvalidHeaderChars(value: string): boolean {
     // RFC 7230 field-vchar / obs-text; disallow control chars except HTAB.
@@ -55,6 +63,21 @@ class SSOAuthInterceptor implements ProxyInterceptor {
   }
 
   async onRequest(context: ProxyContext): Promise<void> {
+    // Browser sign-in happens in another process. Reload before each request so
+    // an open session can use the new cookies without restarting its proxy.
+    const stored = await new CodeMieSSO().getStoredCredentials(this.credentials.apiUrl);
+    if (stored) {
+      // Keep cookie objects alive: metrics uploaders retain those references.
+      // Only refresh credentials for this environment.
+      for (const target of [this.credentials, this.syncCredentials]) {
+        if (!target || new URL(target.apiUrl).origin !== new URL(stored.apiUrl).origin) continue;
+        for (const key of Object.keys(target.cookies)) delete target.cookies[key];
+        Object.assign(target.cookies, stored.cookies);
+        target.apiUrl = stored.apiUrl;
+        target.expiresAt = stored.expiresAt;
+      }
+    }
+
     const invalidCookieKeys: string[] = [];
     const cookiePairs: string[] = [];
 
@@ -77,7 +100,7 @@ class SSOAuthInterceptor implements ProxyInterceptor {
 
     if (cookiePairs.length === 0) {
       throw new AuthenticationError(
-        'Stored SSO session cookies are invalid. Run `codemie profile login` and reconnect the proxy.'
+        'Stored SSO session cookies are invalid. Run `codemie profile login`, then re-send your prompt.'
       );
     }
 
@@ -101,9 +124,11 @@ class SSOAuthInterceptor implements ProxyInterceptor {
     const statusCode = response.statusCode || 0;
     const contentType = String(response.headers['content-type'] || '').toLowerCase();
     const isHtmlLoginPage = statusCode >= 200 && statusCode < 300 && contentType.includes('text/html');
+    const isLoginRedirect = statusCode >= 300 && statusCode < 400
+      && /\/(?:realms\/[^/]+\/protocol\/openid-connect\/auth|login|sso)(?:[/?#]|$)/i.test(String(response.headers.location || ''));
     const isUnauthorized = statusCode === 401 || statusCode === 403;
 
-    if (!isHtmlLoginPage && !isUnauthorized) {
+    if (!isHtmlLoginPage && !isLoginRedirect && !isUnauthorized) {
       return response;
     }
 
@@ -115,12 +140,13 @@ class SSOAuthInterceptor implements ProxyInterceptor {
     // JSON error. This also releases the pooled connection promptly.
     response.resume();
     await markAnalyticsAuthInvalid(reason, this.credentials.apiUrl);
+    const loginOutcome = await startDetachedSsoLogin(this.credentials.apiUrl);
 
     const body = Buffer.from(JSON.stringify({
       error: {
         type: 'authentication_error',
         code: 'AUTH_FAILED',
-        message: 'CodeMie SSO session expired. Run `codemie profile login`, then restart the proxy.',
+        message: `CodeMie SSO session expired. ${describeLogin(loginOutcome)}`,
       },
     }));
     const replacement = tools.fromBuffer(response, body);

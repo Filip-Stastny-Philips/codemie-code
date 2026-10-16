@@ -19,6 +19,17 @@ vi.mock('../../../../../../utils/analytics-auth-status.js', () => ({
   markAnalyticsAuthInvalid,
 }));
 
+vi.mock('../../../sso.auth.js', () => ({
+  CodeMieSSO: class {
+    getStoredCredentials = vi.fn().mockResolvedValue(null);
+  },
+}));
+
+vi.mock('../../../sso.detached-login.js', () => ({
+  startDetachedSsoLogin: vi.fn().mockResolvedValue('started'),
+  describeLogin: vi.fn(() => 'Complete the browser sign-in, then re-send your prompt.'),
+}));
+
 vi.mock('../../../../../../utils/logger.js', () => ({
   logger: {
     debug: vi.fn(),
