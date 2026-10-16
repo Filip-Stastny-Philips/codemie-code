@@ -731,11 +731,10 @@ export enum AgentAdapterType {
   OTLP,
 }
 
-export interface OtlpAgentAdapter  {
-  readonly name: string;
-  readonly type: AgentAdapterType.OTLP;
-
-  processOtlpEvent(rawHookInput: string): Promise<void>;
+export interface OtlpAdapterDeps {
+  ensureOtlpProxy: (agentName: string) => Promise<void>;
+  /** Sends one hook invocation's events as a single batch; true only for a 2xx response. */
+  forwardOtlpEventsToSpool: (events: Record<string, unknown>[], agentName: string) => Promise<boolean>;
 }
 
 /**

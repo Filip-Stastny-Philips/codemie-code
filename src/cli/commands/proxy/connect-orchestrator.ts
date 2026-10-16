@@ -21,7 +21,6 @@ import { syncRegisteredSkills } from '../skills/setup/sync.js';
 import { syncPluginSkills } from '../skills/setup/sync-plugin.js';
 import {
   checkStatus,
-  isProcessAlive,
   readState,
   spawnDaemon,
   stopDaemon,
@@ -49,6 +48,7 @@ import {
 } from './connectors/codex-desktop.js';
 import { writeClaudeCodeOtlpConfig } from './connectors/claude-code-otlp.js';
 import { CLAUDE_CODE_OTLP_AGENT_NAME } from '@/agents/plugins/claude-code-otlp/claude-code-otlp.constants.js';
+import { isProcessAlive } from '@/utils/processes.js';
 
 export const DEFAULT_DAEMON_PORT = 4001;
 
@@ -72,7 +72,10 @@ export interface ConnectOptions {
   verbose?: boolean;
   /** Pin a specific model for the Codex desktop target. */
   model?: string;
-  /** Settings scope for Claude Code OTLP plugin: writes to ~/.claude (user) or .claude (project). Defaults to "user". */
+  /**
+   * Claude Code OTLP tracking scope. Settings always live in ~/.claude/settings.json.
+   * "user" (default) tracks all projects and resets the allowlist; "project" adds only the current project root to it.
+   */
   scope?: "user" | "project";
 }
 
@@ -248,9 +251,8 @@ export async function resolveSsoProxyConfig(
 
 export async function verifySsoCredentials(baseUrl: string, profileName: string): Promise<void> {
   try {
-    const { CodeMieSSO } = await import('../../../providers/plugins/sso/sso.auth.js');
-    const sso = new CodeMieSSO();
-    const creds = await sso.getStoredCredentials(baseUrl);
+    const { getStoredPlatformCredentials } = await import('../../../providers/core/codemie-auth-helpers.js');
+    const creds = await getStoredPlatformCredentials({ provider: 'ai-run-sso', baseUrl });
     if (!creds) {
       console.error(chalk.red(`✗ No SSO credentials found for profile '${profileName}'.`));
       console.error(`  Run: codemie profile login --url ${baseUrl}`);
@@ -597,13 +599,14 @@ async function runCodexDesktop(
   const label = 'Codex Desktop';
   try {
     const candidates = getCodexDesktopAppCandidates();
-    if (!findCodexDesktopApp(candidates) && !options.force) {
+    if (!options.force && !(await findCodexDesktopApp(candidates))) {
       throw new ConfigurationError(
         candidates.length === 0
           ? `The Codex desktop app is not supported on ${process.platform} ` +
             '(macOS and Windows only). Re-run with --force to write the config anyway.'
           : 'Could not find the ChatGPT desktop app (which ships Codex). Looked in: ' +
             `${candidates.join(', ')}. ` +
+            (process.platform === 'win32' ? 'Also queried the current user\'s OpenAI.Codex MSIX package. ' : '') +
             'Install it, or re-run with --force to write the config anyway.'
       );
     }
@@ -656,7 +659,17 @@ async function runClaudeCodeOtlp(options: ClaudeCodeOtlpRunOptions): Promise<Tar
     if (result.backupPath) {
       console.log(chalk.dim(`  Backup written: ${result.backupPath}`));
     }
-    console.log(chalk.yellow('  Restart Claude Code to apply changes.'));
+    if (result.allowlist.length > 0) {
+      console.log(chalk.dim('  Tracked projects:'));
+      for (const projectPath of result.allowlist) {
+        console.log(chalk.dim(`    - ${projectPath}`));
+      }
+    } else {
+      console.log(chalk.dim('  Tracked projects: all projects'));
+    }
+    console.log(chalk.dim('  OTel env is user-level: every Claude Code session exports telemetry to the daemon while it runs;'));
+    console.log(chalk.dim('  data from untracked projects is skipped and swept, never sent.'));
+    console.log(chalk.yellow('  First-time setup needs a Claude Code restart; allowlist changes apply immediately.'));
     return { label, ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -759,9 +772,15 @@ export async function connectTargets(opts: ConnectOptions): Promise<void> {
 
   // Per-target dispatch (spec §3.4) — each writer runs independently.
   const results: TargetResult[] = [];
-  if (targets.claudeDesktop) results.push(await runClaudeDesktop(state, verbose));
-  if (targets.vscode) results.push(await runVscodeByok(state, insiders, config, verbose));
-  if (targets.vscodeClaudeCode) results.push(await runVscodeClaudeCode(state, insiders));
+  if (targets.claudeDesktop) {
+    results.push(await runClaudeDesktop(state, verbose));
+  }
+  if (targets.vscode) {
+    results.push(await runVscodeByok(state, insiders, config, verbose));
+  }
+  if (targets.vscodeClaudeCode) {
+    results.push(await runVscodeClaudeCode(state, insiders));
+  }
   if (targets.codexDesktop) {
     results.push(await runCodexDesktop(state, {
       force: Boolean(opts.force),
@@ -770,7 +789,9 @@ export async function connectTargets(opts: ConnectOptions): Promise<void> {
       verbose,
     }));
   }
-  if (targets.claudeCodeOtlp) results.push(await runClaudeCodeOtlp({ force: Boolean(opts.force), scope: opts.scope }));
+  if (targets.claudeCodeOtlp) {
+    results.push(await runClaudeCodeOtlp({ force: Boolean(opts.force), scope: opts.scope }));
+  }
 
   const anyFailed = results.some((r) => !r.ok);
   const allFailed = results.every((r) => !r.ok);
