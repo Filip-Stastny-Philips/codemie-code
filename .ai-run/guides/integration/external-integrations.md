@@ -15,6 +15,7 @@
 | OpenCode | Open-source AI assistant | SSO/API Key | Via CodeMie proxy |
 | MCP Servers | Remote MCP tool servers | OAuth 2.0 (auto) | `codemie-mcp-proxy` |
 | Enterprise SSO | Corporate auth | SAML/OAuth | `SSO_BASE_URL` |
+| OTLP hook ingestion | Coding tool's own native hook/telemetry events → analytics pipeline | Via CodeMie proxy daemon | `codemie hook --agent <adapter-name>` |
 
 ---
 
@@ -251,17 +252,19 @@ Claude Code's `Stop` hook fires only when the assistant responds. A burst of `!b
 
 | Invariant | Rule |
 |---|---|
-| Hard iteration cap | `Math.max(1, session.messages.length + 1)` — prevents unbounded loops if `transformMessages` regresses |
+| Hard iteration cap | `Math.max(1, n + 1)`, `n` — the length of the conversation view (`conversationMessages`, else `messages`) — prevents unbounded loops if `transformMessages` regresses |
 | Empty-history exit | Loop breaks immediately when `transformMessages` returns `history: []` |
 | Advance guard | Loop breaks if `lastProcessedMessageUuid` and `currentHistoryIndex` are both unchanged from the previous iteration |
 
-`file:src/agents/plugins/claude/session/processors/claude.conversations-processor.ts:128-156`
+The main-transcript sync reads the conversation view `conversationMessages`: a line re-written with the same `uuid` after a compaction (`compact_boundary` between the copies) keeps its first copy, so it is not turned into a history entry again after the sync pointer; other duplicates keep their last copy, as in `messages`. `computeBaselinePointer` reads the same view.
+
+`file:src/agents/plugins/claude/session/processors/claude.conversations-processor.ts:119-177`
 
 ### Per-Iteration Sync Checkpoint
 
 After each successful JSONL append, `SessionStore.saveSession()` persists the updated sync pointer to session metadata. A crash mid-drain cannot cause the next invocation to re-append already-written turns; the final `applyProcessingSyncUpdates` pass is idempotent for the same fields.
 
-`file:src/agents/plugins/claude/session/processors/claude.conversations-processor.ts:189-211`
+`file:src/agents/plugins/claude/session/processors/claude.conversations-processor.ts:217-239`
 
 ### Bash Passthrough Contract
 
@@ -274,6 +277,12 @@ Claude Code injects `!bash` commands as synthetic `type:'user'` messages. The pr
 | `<bash-input></bash-input>` (empty or whitespace) | Filtered; no bare `!` entry emitted |
 
 `file:src/agents/plugins/claude/session/processors/claude.conversations-processor.ts:667-688`, `856-871`
+
+---
+
+## OTLP Hook-Event Ingestion (`OtlpAgentAdapter`)
+
+A separate, agent-agnostic integration from the above: each coding tool that exposes its own native hook/telemetry surface (Claude Code today; e.g. a future Cursor integration) gets one `OtlpAgentAdapter` plugin (`src/agents/plugins/<name>/`) that turns those events into CodeMie analytics via `codemie hook --agent <adapter-name>` → proxy daemon spool → analytics API. The dispatch contract, how to add a new native event to an adapter, and how to wire up a new tool are **not** duplicated here — see `docs/ARCHITECTURE-OTLP-PLUGIN.md`. `claude-code-otlp` (`src/agents/plugins/claude-code-otlp/`) is the current reference implementation.
 
 ---
 
@@ -331,6 +340,7 @@ Validate provider config at startup; warn (not throw) on connectivity failures. 
 
 - Provider plugins: `src/providers/plugins/`
 - Provider core types: `src/providers/core/types.ts`
+- OTLP hook-event adapters: `docs/ARCHITECTURE-OTLP-PLUGIN.md`
 - OpenCode plugin: `src/agents/plugins/opencode/`
 - Codex plugin: `src/agents/plugins/codex/`
 - Claude plugin: `src/agents/plugins/claude/`

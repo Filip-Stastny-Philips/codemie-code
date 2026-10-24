@@ -105,7 +105,7 @@ codemie proxy connect vscode --profile work
 codemie proxy connect vscode --insiders
 ```
 
-The connector resolves the selected profile once, synchronizes skills, and writes every enabled tenant model from the live catalog into VS Code's `User/chatLanguageModels.json`, in catalog order. Known families are enriched from the capability table; unknown models get conservative defaults rather than being dropped. The profile's default model does not affect which models are written. VS Code sends the configured model ID directly; the proxy authenticates the request, adds CodeMie context headers, and applies only the documented compatibility normalization before forwarding.
+The connector resolves the selected profile once, synchronizes skills, and writes every enabled tenant model from the live catalog into VS Code's `User/chatLanguageModels.json`, in catalog order. Known families are enriched from the capability table; unknown models get conservative defaults rather than being dropped. The output limit (`maxOutputTokens`) resolves in the order tenant catalog, built-in capability table, default (8192). The input limit (`maxInputTokens`) is the catalog `max_input_tokens` minus the resolved output limit, so input plus output fits the context window; when the catalog has no usable input value, or the subtraction is not positive, it is the table value or 128000. The profile's default model does not affect which models are written. VS Code sends the configured model ID directly; the proxy authenticates the request, adds CodeMie context headers, and applies only the documented compatibility normalization before forwarding.
 
 `--profile <name>` is a one-command override and does not change the active CodeMie profile. Model and project remain independent: the model is written into VS Code configuration, while `codeMieProject` is passed to the daemon and emitted as `X-CodeMie-Project`. When a selected profile has no project of its own, compatible repository-local project context continues to apply through the standard profile merge rules.
 
@@ -370,14 +370,18 @@ All external agents share the same command pattern:
 # Basic usage
 codemie-claude "message"         # Claude Code agent
 codemie-claude-acp               # Claude Code ACP (invoked by IDEs)
+codemie-codex-acp                # Codex ACP (invoked by IDEs)
 codemie-gemini "message"         # Gemini CLI agent
+codemie-gemini-acp               # Gemini CLI ACP (invoked by IDEs)
+codemie-opencode-acp             # OpenCode ACP (invoked by IDEs)
 
 # Health checks
 codemie-claude health
 codemie-gemini health
 
-# Note: codemie-claude-acp doesn't have interactive mode or health check
-# It's designed to be invoked by IDEs via ACP protocol
+# Note: codemie-claude-acp, codemie-codex-acp, codemie-gemini-acp, and
+# codemie-opencode-acp don't have interactive mode or health check — they're
+# designed to be invoked by IDEs via ACP protocol
 
 # With configuration overrides
 codemie-claude --model claude-sonnet-4-6 --api-key sk-... "review code"
@@ -1164,8 +1168,11 @@ codemie install <agent>
 **Supported Agents:**
 - `claude` - Claude Code (npm-based)
 - `claude-acp` - Claude Code ACP adapter for IDE integration (npm-based)
+- `codex-acp` - Codex ACP adapter for IDE integration (npm-based)
 - `gemini` - Gemini CLI (npm-based)
+- `gemini-acp` - Gemini CLI ACP mode for IDE integration (same `gemini` install)
 - `opencode` - OpenCode AI assistant (npm-based)
+- `opencode-acp` - OpenCode ACP mode for IDE integration (same `opencode` install)
 
 ### `codemie uninstall [agent]`
 
@@ -1597,3 +1604,5 @@ A `cwd` inside any listed path is tracked (nested directories included). An inva
 **Privacy note.** The OTel environment is global, so every Claude Code session, including untracked projects, exports telemetry (with tool details) to the local daemon whenever it runs. That data stays on disk: it is skipped after the send wait limit (`OTLP_SEND_MAX_ATTEMPTS` ticks) and deleted by the sweeper after the abandoned grace period (`OTLP_ABANDONED_SESSION_GRACE_MINUTES`). Nothing from untracked projects is sent to the backend.
 
 Allowlist changes apply immediately; the first-time setup needs a Claude Code restart.
+
+**Backup lifecycle.** `connect` snapshots `~/.claude/settings.json` to `settings.json.codemie-backup` before writing its own hooks/env, and refreshes that backup on every subsequent `connect` that still finds the file already under CodeMie's management (not just the first time) — so it always reflects the state right before the most recent `connect`, not whichever one ran first. Only values that are genuinely foreign (or that a `--force` connect displaced and the live file still carries CodeMie's own replacement for) are ever kept in it; a value you change after `connect` is never recorded as "pre-connect" and is never resurrected by a later `disconnect`. `disconnect` deletes the backup once it finishes: a value you changed or removed since `connect` is left exactly as you set it, never restored from the backup; a value a `--force` connect displaced is put back, but only if nothing has touched it since. If nothing is left in the file after removal, the file itself is deleted. No "restored from backup" message is printed — the backup is bookkeeping, not something you interact with directly.
